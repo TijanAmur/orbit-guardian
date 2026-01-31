@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Pixel Startscreen - Earth Image</title>
+<style>
+  html,body { height:100%; margin:0; background:#000; display:flex; align-items:center; justify-content:center; }
+  canvas { image-rendering: pixelated; image-rendering: crisp-edges; background:#000; display:block; }
+  .ui {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    color: #cfe;
+    font-family: monospace;
+    font-size: 13px;
+    z-index: 20;
+  }
+  .ui button { font-family: monospace; font-size: 13px; margin-right:8px; }
+  #hint { position: absolute; bottom: 10px; left: 10px; color: #8fb; font-family: monospace; font-size: 12px; opacity: 0.9; pointer-events: none; }
+</style>
+</head>
+<body>
+<div class="ui">
+  <button id="tryLoad">Try load "earth.png"</button>
+  <input id="fileinput" type="file" accept="image/*">
+  <span style="opacity:0.8; margin-left:8px;">(oder lade dein PNG)</span>
+</div>
+<canvas id="c"></canvas>
+<div id="hint">Tippe / klicke PLAY</div>
+
+<script>
+/*
+  Pixel Startscreen Demo using a provided Earth PNG (pixel-perfect)
+  - Save your uploaded image as "earth.png" next to this html OR use the file picker
+  - The script scales the sprite using integer multipliers to keep pixels crisp
+*/
+
+// Logical canvas size (world space)
+const BASE_W = 320;
+const BASE_H = 568;
+// integer scale for display (adjust if you want larger)
+const DISPLAY_SCALE = 2;
+
+const canvas = document.getElementById('c');
+canvas.width = BASE_W;
+canvas.height = BASE_H;
+canvas.style.width = (BASE_W * DISPLAY_SCALE) + 'px';
+canvas.style.height = (BASE_H * DISPLAY_SCALE) + 'px';
+const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+// Simple UI wiring
+document.getElementById('tryLoad').addEventListener('click', ()=>{
+  loadEarthFromUrl('earth.png');
+});
+document.getElementById('fileinput').addEventListener('change', (e)=>{
+  const f = e.target.files[0];
+  if(!f) return;
+  const url = URL.createObjectURL(f);
+  loadEarthFromUrl(url, true);
+});
+
+// Earth image state
+let earthImage = null;
+let earthImgNaturalW = 0;
+let earthImgNaturalH = 0;
+let earthLoaded = false;
+let earthScaleTarget = 1;
+
+// Try preload an earth.png automatically (best-effort)
+loadEarthFromUrl('earth.png');
+
+// Utility
+const rand = (a,b) => a + Math.random()*(b-a);
+const easeOutCubic = t => 1 - Math.pow(1 - t, 3);
+const easeInOut = t => t<0.5 ? 2*t*t : -1 + (4 - 2*t)*t;
+
+// Star layers (same as before)
+const starLayers = [
+  {count: 40, speedRange:[20,40], sizeRange:[2,3], orbit:false, stars:[]}, // near
+  {count: 60, speedRange:[8,20], sizeRange:[1,2], orbit:true, stars:[]},   // mid
+  {count: 80, speedRange:[2,8], sizeRange:[1,1], orbit:true, stars:[]}     // far
+];
+function initStars(){
+  starLayers.forEach((layer)=>{
+    layer.stars = [];
+    for(let i=0;i<layer.count;i++){
+      const sx = Math.random()*BASE_W;
+      const sy = Math.random()*BASE_H;
+      const size = Math.round(rand(layer.sizeRange[0], layer.sizeRange[1]));
+      const speed = rand(layer.speedRange[0], layer.speedRange[1]) / 1000;
+      const phase = Math.random()*Math.PI*2;
+      const orbitRadius = layer.orbit ? rand(8, BASE_W*0.12) : 0;
+      const angle = Math.random()*Math.PI*2;
+      const cx = BASE_W/2 + rand(-BASE_W*0.3, BASE_W*0.3);
+      const cy = BASE_H/2 + rand(-BASE_H*0.25, BASE_H*0.25);
+      layer.stars.push({x:sx,y:sy,size,speed,phase,orbitRadius,angle,cx,cy});
+    }
+  });
+}
+initStars();
+
+// State model (buttons, camera, earth)
+const state = {
+  mode: 'start',
+  play: {x: BASE_W/2, y: BASE_H*0.52, w: 200, h:60, pressed:false, alpha:1, flash:0},
+  settings: {x: BASE_W/2, y: BASE_H*0.66, w:120, h:36, pressed:false, alpha:1},
+  camScale: 1,
+  earth: {x: BASE_W/2, y: BASE_H*0.38, baseSize: 96, scale: 0.95, shieldAlpha:0},
+  transitionStart: 0,
+  transitionDuration: 1200,
+  hudAlpha: 0,
+  asteroids: [],
+  lastAsteroidSpawn: 0,
+  disabled: false
+};
+
+// MAIN LOOP
+let last = performance.now();
+function loop(now){
+  const dt = now - last;
+  last = now;
+  update(now, dt);
+  render(now, dt);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// UPDATE
+function update(now, dt){
+  updateStars(dt);
+  if(state.play.flash > 0) state.play.flash = Math.max(0, state.play.flash - dt/120);
+  updateTransition(now, dt);
+  updateAsteroids(now, dt);
+}
+function updateStars(dt){
+  starLayers.forEach((layer)=>{
+    layer.stars.forEach(s=>{
+      if(layer.orbit && s.orbitRadius>0){
+        s.angle += s.speed * dt * 0.2;
+        s.x = s.cx + Math.cos(s.angle + s.phase) * s.orbitRadius;
+        s.y = s.cy + Math.sin(s.angle + s.phase) * (s.orbitRadius*0.6);
+      } else {
+        s.x -= s.speed * dt;
+        if(s.x < -10) s.x = BASE_W + 10;
+      }
+      s.phase += dt * 0.002;
+    });
+  });
+}
+function updateTransition(now, dt){
+  if(state.mode === 'transition'){
+    const t = Math.min(1, (now - state.transitionStart) / state.transitionDuration);
+    state.play.alpha = 1 - Math.min(1, t*1.2);
+    state.settings.alpha = 1 - Math.min(1, t*1.0);
+    const camT = easeInOut(Math.min(1, (now - state.transitionStart) / state.transitionDuration));
+    state.camScale = 1 + camT * 0.8;
+    if(now - state.transitionStart > 120){
+      const earthT = Math.min(1, (now - state.transitionStart - 120)/ (state.transitionDuration - 120));
+      state.earth.scale = 0.95 + easeOutCubic(earthT) * 0.25;
+      if(earthT > 0.6 && earthT < 0.9){
+        const p = (earthT - 0.6) / 0.3;
+        state.earth.shieldAlpha = 0.35 * Math.sin(p * Math.PI);
+      } else {
+        state.earth.shieldAlpha = Math.max(0, state.earth.shieldAlpha - dt/500);
+      }
+    }
+    const hudT = Math.max(0, (now - state.transitionStart) - state.transitionDuration*0.8) / (state.transitionDuration*0.2);
+    state.hudAlpha = Math.min(1, easeOutCubic(hudT));
+    if(t >= 1){
+      state.mode = 'game';
+      state.disabled = false;
+      state.camScale = 1.8;
+      state.lastAsteroidSpawn = now + 200;
+    }
+  }
+}
+function updateAsteroids(now, dt){
+  if(state.mode !== 'game') return;
+  if(now - state.lastAsteroidSpawn > 400){
+    state.lastAsteroidSpawn = now;
+    const side = Math.floor(Math.random()*4);
+    let x,y;
+    if(side === 0){ x = -10; y = Math.random()*BASE_H; }
+    else if(side === 1){ x = BASE_W+10; y = Math.random()*BASE_H; }
+    else if(side === 2){ x = Math.random()*BASE_W; y = -10; }
+    else { x = Math.random()*BASE_W; y = BASE_H+10; }
+    const ex = state.earth.x;
+    const ey = state.earth.y;
+    const angle = Math.atan2(ey - y + rand(-30,30), ex - x + rand(-30,30));
+    const speed = rand(40,120) / 1000;
+    const r = rand(4,9);
+    state.asteroids.push({x,y,angle,speed,r,rot:Math.random()*Math.PI*2});
+  }
+  for(let i = state.asteroids.length-1;i>=0;i--){
+    const a = state.asteroids[i];
+    a.x += Math.cos(a.angle) * a.speed * dt;
+    a.y += Math.sin(a.angle) * a.speed * dt;
+    a.rot += dt*0.002;
+    if(a.x < -50 || a.x > BASE_W+50 || a.y < -50 || a.y > BASE_H+50) state.asteroids.splice(i,1);
+  }
+}
+
+// RENDER
+function render(now, dt){
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0,0,BASE_W,BASE_H);
+
+  // camera transform (world space)
+  ctx.translate(BASE_W/2, BASE_H/2);
+  ctx.scale(state.camScale, state.camScale);
+  ctx.translate(-BASE_W/2, -BASE_H/2);
+
+  drawStars();
+  drawEarthImage(state.earth.scale);
+  drawHUD(state.hudAlpha);
+  drawAsteroids();
+  drawButtons();
+}
+
+function drawStars(){
+  starLayers.forEach((layer)=>{
+    layer.stars.forEach(s=>{
+      const pulse = 0.7 + 0.3 * Math.sin(s.phase + s.x*0.01);
+      ctx.fillStyle = `rgba(255,255,255,${0.08 * pulse})`;
+      ctx.fillRect(Math.round(s.x)-Math.floor(s.size/2), Math.round(s.y)-Math.floor(s.size/2), s.size, s.size);
+    });
+  });
+}
+
+// DRAW EARTH: use image if loaded, otherwise fallback to a procedural pixel-ish globe
+function drawEarthImage(scale = 1){
+  const targetSize = state.earth.baseSize * scale; // target in px
+  const cx = state.earth.x;
+  const cy = state.earth.y;
+  if(earthLoaded && earthImage){
+    // compute integer multiplier to keep pixels crisp
+    const imgW = earthImgNaturalW;
+    const imgH = earthImgNaturalH;
+    // choose scale factor so image fits into targetSize but is integer multiple
+    const scaleX = Math.floor(targetSize / imgW) || 1;
+    const scaleY = Math.floor(targetSize / imgH) || 1;
+    const chosenScale = Math.max(1, Math.min(scaleX, scaleY)); // integer scale
+    const drawW = imgW * chosenScale;
+    const drawH = imgH * chosenScale;
+    const px = Math.round(cx - drawW/2);
+    const py = Math.round(cy - drawH/2);
+    // draw earth image scaled by integer factor
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(earthImage, 0, 0, imgW, imgH, px, py, drawW, drawH);
+    ctx.restore();
+  } else {
+    // fallback: draw a simple placeholder colored circle (pixelated)
+    const size = Math.round(targetSize);
+    const px = Math.round(cx - size/2);
+    const py = Math.round(cy - size/2);
+    // crude pixel circle
+    ctx.fillStyle = '#39A8E0';
+    ctx.fillRect(px, py, size, size);
+    ctx.fillStyle = '#2FA84A';
+    const inset = Math.max(4, Math.floor(size*0.15));
+    ctx.fillRect(px+inset, py+inset, size-inset*2, size-inset*2);
+  }
+
+  // Shield halo (additive)
+  if(state.earth.shieldAlpha > 0){
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const haloRad = (state.earth.baseSize * Math.max(1, scale)) * 0.6;
+    const grad = ctx.createRadialGradient(cx, cy, haloRad*0.2, cx, cy, haloRad);
+    grad.addColorStop(0, `rgba(127,243,255,${state.earth.shieldAlpha})`);
+    grad.addColorStop(1, 'rgba(127,243,255,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, haloRad, 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+function drawButtons(){
+  drawButton(state.play.x, state.play.y, state.play.w, state.play.h, "PLAY", state.play.alpha, state.play.pressed, state.play.flash, false);
+  drawButton(state.settings.x, state.settings.y, state.settings.w, state.settings.h, "SETTINGS", state.settings.alpha, state.settings.pressed, 0, true);
+}
+
+function drawButton(x,y,w,h,label,alpha,pressed,flash, isSmall=false){
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  const shadowOffset = 3;
+  const pressScale = pressed ? 0.96 : 1;
+  ctx.translate(x, y);
+  ctx.scale(pressScale, pressScale);
+  ctx.translate(-x, -y);
+
+  ctx.fillStyle = '#060606';
+  ctx.fillRect(Math.round(x - w/2 + shadowOffset), Math.round(y - h/2 + shadowOffset), w, h);
+
+  ctx.fillStyle = '#111';
+  ctx.fillRect(Math.round(x - w/2), Math.round(y - h/2), w, h);
+
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(Math.round(x - w/2), Math.round(y - h/2), w, h);
+
+  ctx.fillStyle = '#fff';
+  ctx.font = `${isSmall ? 14 : 24}px monospace`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(label, x + (flash>0? (Math.random()*2-1):0), y);
+
+  if(flash > 0){
+    ctx.fillStyle = `rgba(255,255,255,${flash*0.9})`;
+    ctx.fillRect(Math.round(x - w/2), Math.round(y - h/2), w, h);
+  }
+
+  ctx.restore();
+}
+
+function drawHUD(alpha){
+  if(alpha <= 0) return;
+  ctx.save();
+  const t = alpha;
+  ctx.globalAlpha = alpha;
+  ctx.translate(0, - (1 - t)*80);
+  ctx.fillStyle = '#0b0b0b';
+  ctx.fillRect(0, 0, BASE_W, 40);
+  ctx.strokeStyle = '#888';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(0,0,BASE_W,40);
+  ctx.fillStyle = '#cfe';
+  ctx.font = '13px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('HUD • Leben: 3  • Energie: 100%', 8, 24);
+  ctx.restore();
+}
+
+function drawAsteroids(){
+  ctx.save();
+  for(const a of state.asteroids){
+    ctx.translate(a.x, a.y);
+    ctx.rotate(a.rot);
+    ctx.fillStyle = '#8b6b4a';
+    ctx.fillRect(-a.r, -a.r, a.r*2, a.r*2);
+    ctx.rotate(-a.rot);
+    ctx.translate(-a.x, -a.y);
+  }
+  ctx.restore();
+}
+
+// Input handling
+let pointerDown = false;
+canvas.addEventListener('pointerdown', (e)=>{
+  if(state.disabled) return;
+  const rect = canvas.getBoundingClientRect();
+  const sx = (e.clientX - rect.left) / DISPLAY_SCALE;
+  const sy = (e.clientY - rect.top) / DISPLAY_SCALE;
+  if(hitTestButton(sx, sy, state.play)){
+    state.play.pressed = true;
+    state.play.flash = 1.0;
+    pointerDown = true;
+  } else if(hitTestButton(sx, sy, state.settings)){
+    openSettings();
+  }
+});
+canvas.addEventListener('pointerup', (e)=>{
+  if(!pointerDown) return;
+  pointerDown = false;
+  if(state.play.pressed){
+    state.play.pressed = false;
+    startPlayTransition();
+  }
+});
+function hitTestButton(px, py, btn){
+  const bx = btn.x - btn.w/2;
+  const by = btn.y - btn.h/2;
+  return px >= bx && px <= bx+btn.w && py >= by && py <= by+btn.h;
+}
+function openSettings(){
+  alert("Settings (Demo)\n• Steuerung A/B\n• Auto-Shoot On/Off\n(Implement proper in-game panel)");
+}
+function startPlayTransition(){
+  if(state.mode !== 'start') return;
+  state.disabled = true;
+  state.mode = 'transition';
+  state.transitionStart = performance.now();
+  state.play.flash = 1.0;
+}
+
+// Load earth from URL or object URL
+function loadEarthFromUrl(url, revoke=false){
+  const img = new Image();
+  img.onload = () => {
+    earthImage = img;
+    earthImgNaturalW = img.width;
+    earthImgNaturalH = img.height;
+    earthLoaded = true;
+    console.log('Earth loaded', img.width, img.height);
+    if(revoke){
+      // if url was created with createObjectURL, we won't revoke here because we might need it
+    }
+  };
+  img.onerror = () => {
+    console.warn('Failed to load earth image from', url);
+    earthLoaded = false;
+  };
+  img.src = url;
+}
+
+// initial idle earth breathing
+setInterval(()=>{
+  if(state.mode === 'start'){
+    const t = (performance.now()/1000) % 10;
+    state.earth.scale = 0.95 + 0.03 * Math.sin(t*0.8);
+  }
+}, 80);
+
+</script>
+</body>
+</html>
