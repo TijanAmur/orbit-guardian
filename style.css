@@ -110,6 +110,10 @@ body {
     transform: none;
   }
 
+  #controls {
+    display: none !important;
+  }
+
   .edge-arrow {
     bottom: var(--edge-bottom);
     width: var(--edge-size);
@@ -128,6 +132,12 @@ body {
     --edge-size: clamp(44px, 14vw, 60px);
     --edge-bottom: clamp(80px, 18vh, 140px);
     --edge-gap: clamp(10px, 4.5vw, 24px);
+  }
+}
+
+@media (pointer: coarse) {
+  #controls {
+    display: none !important;
   }
 }
 

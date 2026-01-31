@@ -120,11 +120,6 @@
         <button class="ctrBtn" id="shootBtn">SHOOT</button>
     </div>
 
-    <!-- EDGE ARROWS (MODE B) -->
-    <div id="edgeControls" class="edge-controls" aria-hidden="true">
-        <button id="edgeLeftBtn" class="edge-arrow edge-left" aria-hidden="true">◀</button>
-        <button id="edgeRightBtn" class="edge-arrow edge-right" aria-hidden="true">▶</button>
-    </div>
 
     <!-- LEADERBOARD PANEL -->
     <div id="leaderboardPanel" class="leaderboard-panel">
@@ -583,26 +578,10 @@ function setGameplayMode(mode){
 }
 
 function updateModeUI(){
-    const edgeControls = document.getElementById('edgeControls');
     const tapLayer = document.getElementById('tapLayer');
-    if (!edgeControls) return;
     if (getGameplayMode() === 'B'){
-        edgeControls.classList.add('is-visible');
-        edgeControls.setAttribute('aria-hidden', 'false');
-        edgeControls.style.display = 'block';
-        const l = document.getElementById('edgeLeftBtn');
-        const r = document.getElementById('edgeRightBtn');
-        if (l) l.disabled = false;
-        if (r) r.disabled = false;
         if (tapLayer){ tapLayer.classList.remove('is-active'); tapLayer.setAttribute('aria-hidden','true'); }
     } else {
-        edgeControls.classList.remove('is-visible');
-        edgeControls.setAttribute('aria-hidden', 'true');
-        edgeControls.style.display = 'none';
-        const l = document.getElementById('edgeLeftBtn');
-        const r = document.getElementById('edgeRightBtn');
-        if (l) l.disabled = true;
-        if (r) r.disabled = true;
         if (tapLayer){ tapLayer.classList.add('is-active'); tapLayer.setAttribute('aria-hidden','false'); }
     }
 }
@@ -907,7 +886,6 @@ const SKINS = {
     ]
 };
 
-        
 let activeSkins = {
     player: localStorage.getItem('og_skin_player') || 'classic',
     laser: localStorage.getItem('og_skin_laser') || 'standard',
@@ -3124,23 +3102,6 @@ if (nukeBtn){
     if (dirBtn) dirBtn.addEventListener('pointercancel', (e)=>{ e.preventDefault(); handleDirectionInputEnd(); }, { passive: false });
     if (dirBtn) dirBtn.addEventListener('pointerleave', (e)=>{ e.preventDefault(); handleDirectionInputEnd(); }, { passive: false });
     if (shootBtn) shootBtn.addEventListener('pointerdown', (e)=>{ e.preventDefault(); shootOnce(true); }, { passive: false });
-    const edgeLeftBtn = document.getElementById('edgeLeftBtn');
-    const edgeRightBtn = document.getElementById('edgeRightBtn');
-    const setDirection = (dir)=>{
-        if (!running) return;
-        orbit.dir = dir;
-        startAudioIfNeeded();
-        playBeep();
-    };
-    const edgeLeft = (e)=>{ e.preventDefault(); if (getGameplayMode() === 'B') setDirection(-1); };
-    const edgeRight = (e)=>{ e.preventDefault(); if (getGameplayMode() === 'B') setDirection(1); };
-    if (edgeLeftBtn){
-        edgeLeftBtn.addEventListener('pointerdown', edgeLeft, { passive: false });
-    }
-    if (edgeRightBtn){
-        edgeRightBtn.addEventListener('pointerdown', edgeRight, { passive: false });
-    }
-
     const tapLayer = document.getElementById('tapLayer');
     if (tapLayer){
         tapLayer.addEventListener('pointerdown', (e)=>{
@@ -3466,5 +3427,4 @@ if (nukeBtn){
     }
 </script>
 </body>
-
 </html> 
