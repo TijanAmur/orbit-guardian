@@ -139,6 +139,9 @@ body {
   #controls {
     display: none !important;
   }
+  .edge-controls {
+    display: none !important;
+  }
 }
 
 /* ===== POWER-UP OVERLAY ===== */
@@ -3508,6 +3511,7 @@ button {
   inset: 0;
   pointer-events: none;
   z-index: 4;
+  display: none !important;
 }
 .edge-controls.is-visible {
   pointer-events: none;

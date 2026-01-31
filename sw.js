@@ -1,4 +1,4 @@
-const CACHE_NAME = "orbit-guardian-v1";
+const CACHE_NAME = "orbit-guardian-v2";
 
 const FILES_TO_CACHE = [
   "./",
@@ -6,7 +6,10 @@ const FILES_TO_CACHE = [
   "./style.css",
   "./game.js",
   "./manifest.json",
-  "./icon.png"
+  "./icon.png",
+  "./earth.png",
+  "./background-music-463062.mp3",
+  "./startscreen-earth.html"
 ];
 
 // Install: Dateien speichern
