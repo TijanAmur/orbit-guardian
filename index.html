@@ -115,10 +115,6 @@
     <div id="tapLayer" class="tap-layer" aria-hidden="true"></div>
     <div id="powerupOverlay" class="powerup-overlay" style="display: none;"></div>
 
-    <div id="controls">
-        <button class="ctrBtn" id="dirBtn"> </button>
-        <button class="ctrBtn" id="shootBtn">SHOOT</button>
-    </div>
 
 
     <!-- LEADERBOARD PANEL -->
@@ -217,6 +213,7 @@
             </div>
             <div class="start-footer">
                 <div class="tips">Tipp: <kbd>F</kbd> schießen • <kbd>Q</kbd> Zeitlupe</div>
+                <div class="version-label">v1.8</div>
                 <div class="small-row"><button id="settingsBtn" class="ghost">SETTINGS</button></div>
             </div>
         </div>
@@ -1219,8 +1216,8 @@ let screenShake = 0.0;
 
 // Boss / PowerUps / SlowTime
 let bossActive = false;
-let nextBossScore = 800;
-const bossScoreInterval = 800;
+let nextBossScore = 2600;
+const bossScoreInterval = 2000;
 let bossObj = null; // reference to active boss
 let bossesKilled = 0; // Boss counter
 let powerUps = [];
@@ -1651,15 +1648,16 @@ const POWER_UPS = {
     PIERCING_SHOTS: { name: 'Piercing Shots', category: 'OFFENSIV', color: '#ffaa3b', duration: 20, rarity: 0.3 },
     EXPLOSION_SHOTS: { name: 'Explosion Shots', category: 'OFFENSIV', color: '#ff5c3b', duration: 18, rarity: 0.25 },
     TIME_SLOW: { name: 'Time Slow', category: 'CONTROL', color: '#a84aff', duration: 16, rarity: 0.25 },
-    MAGNET_SHOTS: { name: 'Magnet Shots', category: 'CONTROL', color: '#3bffff', duration: 18, rarity: 0.3 },
-    ORBIT_BOOST: { name: 'Orbit Boost', category: 'CONTROL', color: '#ffff4a', duration: 16, rarity: 0.35 },
+    MAGNET_SHOTS: { name: 'Magnet Shots', category: 'CONTROL', color: '#3bffff', duration: 22, rarity: 0.3 },
+    ORBIT_BOOST: { name: 'Orbit Boost', category: 'CONTROL', color: '#ffff4a', duration: 20, rarity: 0.35 },
     NUKE: { name: 'Nuke', category: 'SPECIAL', color: '#ff3b3b', duration: 0, rarity: 0.15 },
-    BULLET_STORM: { name: 'Bullet Storm', category: 'SPECIAL', color: '#ff00ff', duration: 14, rarity: 0.15 },
+    BULLET_STORM: { name: 'Bullet Storm', category: 'SPECIAL', color: '#ff00ff', duration: 18, rarity: 0.15 },
     PRECISION_MODE: { name: 'Precision Mode', category: 'SPECIAL', color: '#00ffff', duration: 20, rarity: 0.1 }
 };
 
 let activePowerUp = null;
 let powerUpTimer = 0;
+let pendingPowerUp = null;
 let shieldHP = 0;
 let piercingActive = false;
 let explosionActive = false;
@@ -1680,6 +1678,11 @@ function grantRandomPowerUp() {
     }
     
     if (!selected) selected = 'CORE_REPAIR';
+    // Delay power-up activation until enough asteroids are visible
+    if (asteroids.length < 3){
+        pendingPowerUp = selected;
+        return;
+    }
     activatePowerUp(selected);
 }
 
@@ -1837,11 +1840,16 @@ function spawnAsteroid(){
 
     const r = Math.random();
     let type = 'med'; let radius = 10 + Math.random()*8; let hp = 1; let scoreValue = 15;
-    if (r < 0.45){ type = 'small'; radius = 6 + Math.random()*4; speed *= 1.4; hp = 1; scoreValue = 10; }
-    else if (r < 0.85){ type = 'med'; radius = 10 + Math.random()*8; hp = 1; scoreValue = 15; }
-    else { type = 'big'; radius = 18 + Math.random()*12; speed *= 0.6; hp = 2 + Math.floor(Math.random()*2); scoreValue = 30; }
+    let shieldHits = 0; let phantom = false; let magnet = false;
 
-    asteroids.push({ x, y, vx: dx/len*speed, vy: dy/len*speed, radius, sprite, type, hp, scoreValue });
+    if (r < 0.40){ type = 'small'; radius = 6 + Math.random()*4; speed *= 1.4; hp = 1; scoreValue = 10; }
+    else if (r < 0.78){ type = 'med'; radius = 10 + Math.random()*8; hp = 1; scoreValue = 15; }
+    else if (r < 0.90){ type = 'big'; radius = 18 + Math.random()*12; speed *= 0.6; hp = 2 + Math.floor(Math.random()*2); scoreValue = 30; }
+    else if (r < 0.95){ type = 'shield'; radius = 14 + Math.random()*8; hp = 1; shieldHits = 2; scoreValue = 22; }
+    else if (r < 0.98){ type = 'magnet'; radius = 12 + Math.random()*7; hp = 2; magnet = true; scoreValue = 24; }
+    else { type = 'phantom'; radius = 12 + Math.random()*7; hp = 1; phantom = true; scoreValue = 26; }
+
+    asteroids.push({ x, y, vx: dx/len*speed, vy: dy/len*speed, radius, sprite, type, hp, scoreValue, shieldHits, phantom, magnet, shieldFlash: 0, phantomAlpha: 1, phantomTimer: Math.random()*1.5 });
 }
 
 function spawnBoss(){
@@ -1943,6 +1951,13 @@ function explode(x,y,count){
 function drawAsteroids(){
     for (const a of asteroids){
         const r = Math.max(4, Math.floor(a.radius));
+        if (a.phantom && a.phantomAlpha === 0){
+            continue;
+        }
+        ctx.save();
+        if (a.phantom){
+            ctx.globalAlpha = 0.35 + (a.phantomAlpha || 1) * 0.65;
+        }
         if (a.sprite && a.sprite.complete && a.sprite.naturalWidth > 0) {
             ctx.imageSmoothingEnabled = false;
             try {
@@ -1955,6 +1970,29 @@ function drawAsteroids(){
             ctx.fillStyle = '#bfbfbf';
             ctx.fillRect(Math.floor(a.x - r), Math.floor(a.y - r), r*2, r*2);
         }
+
+        // shield ring flicker
+        if (a.shieldHits > 0 || (a.shieldFlash && a.shieldFlash > 0)){
+            const glow = a.shieldFlash ? 0.7 : 0.35;
+            ctx.strokeStyle = `rgba(80, 200, 255, ${glow})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(a.x, a.y, r + 3, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+
+        // magnet particles
+        if (a.magnet){
+            for (let i = 0; i < 3; i++){
+                const ang = (performance.now()/300 + i*2) % (Math.PI*2);
+                const pr = r + 6 + i*2;
+                const px = a.x + Math.cos(ang) * pr;
+                const py = a.y + Math.sin(ang) * pr;
+                ctx.fillStyle = 'rgba(80,255,255,0.6)';
+                ctx.fillRect(Math.floor(px), Math.floor(py), 2, 2);
+            }
+        }
+        ctx.restore();
     }
 }
 
@@ -2119,6 +2157,13 @@ function update(dt){
     spawnTimer -= dt;
     if (!bossActive && spawnTimer <= 0){ spawnTimer = spawnEvery; spawnAsteroid(); }
 
+    // activate pending power-up when enough asteroids are visible
+    if (pendingPowerUp && asteroids.length >= 3){
+        const key = pendingPowerUp;
+        pendingPowerUp = null;
+        activatePowerUp(key);
+    }
+
     // check boss spawn by score
     if (!bossActive && !bossWarning && Math.floor(score) >= nextBossScore){
         // Start warning 2 seconds before spawn
@@ -2133,7 +2178,7 @@ function update(dt){
             // Spawn boss after 2 second warning
             spawnBoss();
             bossWarning = null;
-            nextBossScore += bossScoreInterval;
+            nextBossScore += bossScoreInterval + bossesKilled * 400;
         } else if (elapsed >= 1.0){
             // Last second - go RED
             bossWarning.warningPhase = 'red';
@@ -2156,6 +2201,16 @@ function update(dt){
     for (let i = asteroids.length - 1; i >= 0; i--){
         const a = asteroids[i];
         a.x += a.vx * dt; a.y += a.vy * dt;
+        if (a.phantom){
+            a.phantomTimer = (a.phantomTimer || 0) - dt;
+            if (a.phantomTimer <= 0){
+                a.phantomAlpha = (a.phantomAlpha === 0 ? 1 : 0);
+                a.phantomTimer = 0.35 + Math.random()*0.6;
+            }
+        }
+        if (a.shieldFlash){
+            a.shieldFlash = Math.max(0, a.shieldFlash - dt);
+        }
         const dx = a.x - core.x; const dy = a.y - core.y; const dist = Math.hypot(dx, dy);
         // critical near-miss slow (auto-trigger) if an asteroid is very close OR if core is at 1 HP
         if (!bossActive && slowCooldown <= 0 && (dist < a.radius + core.r * 0.9 + 18 || coreHP <= 1)){
@@ -2187,6 +2242,19 @@ function update(dt){
     for (let i = bullets.length - 1; i >= 0; i--){
         const b = bullets[i];
         b.x += b.vx * dt; b.y += b.vy * dt; b.life -= dt;
+        // magnet asteroid effect: curve bullets toward magnet asteroids
+        for (const a of asteroids){
+            if (!a.magnet) continue;
+            if (a.phantom && a.phantomAlpha === 0) continue;
+            const dxm = a.x - b.x, dym = a.y - b.y;
+            const distm = Math.hypot(dxm, dym);
+            if (distm < 180){
+                const pull = 90;
+                const factor = Math.min(1, (180 - distm) / 180);
+                b.vx += (dxm / distm) * pull * factor * dt;
+                b.vy += (dym / distm) * pull * factor * dt;
+            }
+        }
         // homing steering (gentle) if assigned a target
         if (b.homing && b.target){
             if (!asteroids.includes(b.target) || Math.hypot(b.x - b.target.x, b.y - b.target.y) > 800){ delete b.homing; delete b.target; }
@@ -2228,9 +2296,18 @@ function update(dt){
         }
         for (let j = asteroids.length - 1; j >= 0; j--){
             const a = asteroids[j];
+            if (a.phantom && a.phantomAlpha === 0) continue;
             const dx = a.x - b.x; const dy = a.y - b.y;
             if (dx*dx + dy*dy < (a.radius + 2) ** 2){
                 // hit asteroid
+                if (a.shieldHits && a.shieldHits > 0){
+                    a.shieldHits -= 1;
+                    a.shieldFlash = 0.25;
+                    startAudioIfNeeded(); playBeep(900, 0.04);
+                    explode(b.x, b.y, 4);
+                    bullets.splice(i,1);
+                    continue;
+                }
                 a.hp = (a.hp || 1) - 1;
                 if (a.hp > 0){
                     // small hit effect
@@ -2317,7 +2394,10 @@ function update(dt){
                     // Piercing shots: don't remove bullet
                     if (!piercingActive) bullets.splice(i,1);
                     if (wasBoss){
-                        bossActive = false; bossObj = null; spawnTimer = 0.3; updateBossUI();
+                        bossActive = false; bossObj = null; spawnTimer = 0.05; spawnEvery = Math.max(minSpawnEvery, spawnEvery * 0.75);
+                        // burst a few immediate asteroids after boss
+                        for (let k = 0; k < 3; k++){ spawnAsteroid(); }
+                        updateBossUI();
                         bossesKilled++; // Increment boss counter
                         updateBossCounter();
                         updateChallenge('bosses', bossesKilled);
@@ -2545,15 +2625,17 @@ function loop(now) {
     // Score only from destroying asteroids (no automatic time-based points)
     scoreEL.textContent = String(Math.floor(score));
 
-    // Magnet effect: attract asteroids towards core
-    if (magnetActive){
+    // Magnet effect: gently pull asteroids toward orbit ring (not into core)
+    if (magnetActive && asteroids.length > 2){
+        const safe = orbit.r + core.r + 24;
         for (const a of asteroids){
-            const dx = core.x - a.x, dy = core.y - a.y;
+            const dx = a.x - core.x, dy = a.y - core.y;
             const dist = Math.hypot(dx, dy);
-            if (dist > 1){
-                const pull = 120; // magnetisches Zugkraft
-                a.vx += (dx / dist) * pull * dt;
-                a.vy += (dy / dist) * pull * dt;
+            if (dist < safe + 120){
+                const push = 120; // repel strength
+                const factor = Math.min(1, (safe + 120 - dist) / 120);
+                a.vx += (dx / dist) * push * factor * dt;
+                a.vy += (dy / dist) * push * factor * dt;
             }
         }
     }
